@@ -1,0 +1,300 @@
+﻿// AbstractPuzzleClass handles many of the generic operations such as switching pixels,
+// generating hint numbers, and checking the current puzzle state for a match to the solution
+
+using UnityEngine;
+//using System.Collections;
+//using System.Collections.Generic;
+using IntList = System.Collections.Generic.List<System.Int32>;
+using VectorList = System.Collections.Generic.List<UnityEngine.Vector2>;
+using Random = UnityEngine.Random;
+
+// Create a new enumeration list for use of different tools
+public enum Tool {
+	arrow, pencil, marker
+}
+
+public static class AbstractPuzzleClass {
+
+	// Set up darker color that still lets the black dividing lines be seen
+	public static Color darkGray = new Color(0.2f, 0.2f, 0.2f, 1);
+
+	#region Puzzle Generation method, given difficulty, and puzzle dimensions
+
+	public static Texture2D GeneratePuzzle(int puzzleWidth, int puzzleHeight, int difficulty) {
+		Texture2D texture = new Texture2D(puzzleWidth, puzzleHeight);
+		texture.filterMode = FilterMode.Point;
+
+		Color[] puzzlePixels = new Color[puzzleWidth * puzzleHeight];
+
+		for (int y = 0; y < puzzleHeight; y++) {
+			for (int x = 0; x < puzzleWidth; x++) {
+				float value = Random.Range(0f, difficulty + 1f);
+
+				if (value >= (difficulty + 1) * 0.75f - 0.75f) {
+					puzzlePixels[y * puzzleWidth + x] = darkGray;
+				} else {
+					puzzlePixels[y * puzzleWidth + x] = Color.white;
+				}
+			}
+		}
+
+		texture.SetPixels(puzzlePixels);
+		texture.Apply();
+
+		return texture;
+	}
+
+	#endregion
+
+	#region SwitchPixel method, Operates on the current XY mouse location to switch the corresponding pixel on the provided texture
+
+	public static Vector2 SwitchPixel(Tool tool, Texture2D texture, VectorList CurrentRunPos, int locationX, int locationY) {
+		Color[] pixels = texture.GetPixels();
+
+		if (tool == Tool.pencil) {
+
+			if (CurrentRunPos.Count == 0) {
+				if (pixels[locationY * texture.width + locationX] == Color.white) {
+					texture.SetPixel(locationX, locationY, darkGray);
+				} else {
+					texture.SetPixel(locationX, locationY, Color.white);
+				}
+			} else {
+				if (texture.GetPixel((int)CurrentRunPos[0].x, (int)CurrentRunPos[0].y) == darkGray) {
+						if (texture.GetPixel(locationX, locationY) == Color.white) {
+							texture.SetPixel(locationX, locationY, darkGray);
+						}
+				} else {
+					texture.SetPixel(locationX, locationY, Color.white);
+				}
+			}
+		} else if (tool == Tool.marker) {
+			if (CurrentRunPos.Count == 0) {
+				if (pixels[locationY * texture.width + locationX] == Color.white) {
+					texture.SetPixel(locationX, locationY, Color.yellow);
+				} else {
+					texture.SetPixel(locationX, locationY, Color.white);
+				}
+			} else {
+				if (texture.GetPixel((int)CurrentRunPos[0].x, (int)CurrentRunPos[0].y) == Color.yellow) {
+					if (texture.GetPixel(locationX, locationY) == Color.white){
+						texture.SetPixel(locationX, locationY, Color.yellow);
+					}
+				} else {
+					texture.SetPixel(locationX, locationY, Color.white);
+				}
+			}
+		}
+
+		texture.Apply();
+
+		return new Vector2(locationX, locationY);
+	}
+
+	#endregion
+
+	#region Solution finding methods, Consecutive and Binary
+
+	public static IntList FindSolutionWConsecutives(Texture2D texture, IntList PuzzleSolution){
+		for(int y = 0; y < texture.height; y++) {
+			int currentRun = 0;
+			for(int x = 0; x < texture.width; x++) {
+				if (texture.GetPixel(x, y) == darkGray) {
+					currentRun ++;
+				} else {
+					if (currentRun != 0) {
+						PuzzleSolution.Add(currentRun);
+						currentRun = 0;
+					}
+				}
+			}
+			if (currentRun != 0) {
+				PuzzleSolution.Add(currentRun);
+				currentRun = 0;
+			}
+			PuzzleSolution.Add(0);
+		}
+
+		for(int x = 0; x < texture.width; x++) {
+			int currentRun = 0;
+			for(int y = 0; y < texture.height; y++) {
+				if (texture.GetPixel(x, y) == darkGray) {
+					currentRun ++;
+				} else {
+					if (currentRun != 0) {
+						PuzzleSolution.Add(currentRun);
+						currentRun = 0;
+					}
+				}
+			}
+			if (currentRun != 0) {
+				PuzzleSolution.Add(currentRun);
+				currentRun = 0;
+			}
+			PuzzleSolution.Add(0);
+		}
+
+		return PuzzleSolution;
+	}
+
+	public static IntList FindSolutionWBinary(Texture2D texture, IntList PuzzleSolution){
+		for(int y = 0; y < texture.height; y++) {
+			for(int x = 0; x < texture.width; x++) {
+				if (texture.GetPixel(x, y) == darkGray) {
+					PuzzleSolution.Add(1);
+				} else {
+					PuzzleSolution.Add(0);
+				}
+			}
+		}
+
+		return PuzzleSolution;
+	}
+
+	#endregion
+
+	#region Left and Top hint generation
+
+	public static string GetLeftHints(Texture2D texture) {
+		string leftHints = "";
+
+		for(int y = 0; y < texture.height; y++) {
+			bool containsNumbers = false;
+			int currentRun = 0;
+			for(int x = 0; x < texture.width; x++) {
+				if (texture.GetPixel(x, y) == darkGray) {
+					containsNumbers = true;
+					currentRun ++;
+				} else {
+					if (currentRun != 0) {
+						leftHints += CheckForDoubles(currentRun) + " ";
+						currentRun = 0;
+					}
+				}
+
+			}
+			if (currentRun != 0) {
+				
+
+				leftHints += CheckForDoubles(currentRun) + " ";
+				currentRun = 0;
+			}
+			if (!containsNumbers) {
+				leftHints += "0 ";
+			}
+
+			leftHints = leftHints.Substring(0, leftHints.Length - 1);
+
+			containsNumbers = false;
+
+			leftHints += "\n";
+		}
+		leftHints = leftHints.Substring(0, leftHints.Length - 1);
+
+		return leftHints;
+	}
+
+	public static string GetTopHints(Texture2D texture) {
+		string topHints = "";
+
+		for(int x = 0; x < texture.width; x++) {
+			bool containsNumbers = false;
+			int currentRun = 0;
+			for(int y = texture.width - 1; y >= 0; y--) {
+				if (texture.GetPixel(x, y) == darkGray) {
+					containsNumbers = true;
+					currentRun ++;
+				} else {
+					if (currentRun != 0) {
+						topHints += CheckForDoubles(currentRun) + " ";
+						currentRun = 0;
+					}
+				}
+			}
+			if (currentRun != 0) {
+				topHints += CheckForDoubles(currentRun) + " ";
+				currentRun = 0;
+			}
+			if (!containsNumbers) {
+				topHints += "0 ";
+			}
+
+			topHints = topHints.Substring(0, topHints.Length - 1);
+
+			containsNumbers = false;
+
+			topHints += "\n";
+		}
+		topHints = topHints.Substring(0, topHints.Length - 1);
+
+		return topHints;
+	}
+
+	static string CheckForDoubles(int currentRun) {
+		switch (currentRun) {
+			case 10:
+				return "a";
+			case 11:
+				return "b";
+			case 12:
+				return "c";
+			case 13:
+				return "d";
+			case 14:
+				return "e";
+			case 15:
+				return "f";
+			case 16:
+				return "g";
+			case 17:
+				return "h";
+			case 18:
+				return "i";
+			case 19:
+				return "j";
+			case 20:
+				return "k";
+			default:
+				return currentRun.ToString();
+		}
+	}
+
+	#endregion
+
+	#region Solution checking method, compares each value in the PuzzleSolution list with each value in the PuzzleCurrent list
+
+	public static bool CheckSolution(IntList PuzzleCurrent, IntList PuzzleSolution) {
+		if (PuzzleCurrent.Count != PuzzleSolution.Count) {
+			return false;
+		} else {
+			for (int c = 0; c < PuzzleCurrent.Count; c++) {
+				if (PuzzleCurrent[c] != PuzzleSolution[c]) {
+					return false;
+				}
+			}
+
+			return true;
+		}
+	}
+
+	#endregion
+
+	#region ResetPuzzle method will clear a puzzle by filling it in all white
+
+	public static Texture2D ResetPuzzle(Texture2D texture) {
+		Color[] resetPuzzle = new Color[texture.width * texture.height];
+
+		for (int i = 0; i < texture.width; i++) {
+			for (int j = 0; j < texture.height; j++) {
+				resetPuzzle[i * texture.height + j] = Color.white;
+			}
+		}
+
+		texture.SetPixels(resetPuzzle);
+		texture.Apply();
+
+		return texture;
+	}
+
+	#endregion
+}

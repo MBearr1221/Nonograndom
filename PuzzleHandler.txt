@@ -1,0 +1,417 @@
+﻿// PuzzleHandler class takes care of all of the operations that involve calling for
+// generation of puzzles and checking for their solutions, as well as realtime operations of the user
+// as they work to solve the puzzle
+
+using UnityEngine;
+using UnityEngine.UI;
+//using System.Collections;
+//using System.Collections.Generic;
+using IntList = System.Collections.Generic.List<System.Int32>;
+using VectorList = System.Collections.Generic.List<UnityEngine.Vector2>;
+using UnityEngine.SceneManagement;
+
+public class PuzzleHandler : MonoBehaviour {
+
+	#region Variables
+
+	private const string PUZZLE_SIZE = "puzzleSize";
+	private const string DIFFICULTY = "difficulty";
+	private const string CONTROL_TOGGLE = "toggle";
+
+	int puzzleWidth;
+//	public int puzzleHeight;
+	[Range((int)1, (int)3)]
+	public int difficulty;
+
+	public GameObject gridGO;
+	public GameObject gridBGO;
+	public Text leftHints;
+	public Text topHints;
+	public GameObject winText;
+	public GameObject timerTextGO;
+	Text timerText;
+	float timer;
+	int days, hours, minutes, seconds;
+	public Button pencilTool;
+	public Button markerTool;
+	public Dropdown puzzleSizeSelector;
+	public Dropdown difficultySelector;
+	public Texture2D pencilCursor;
+	public Texture2D markCursor;
+	public Toggle hotkeyToggle;				// controlMethod == 0
+	public Toggle mouseClickToggle;			// controlMethod == 1
+	int controlMethod;
+
+	ColorBlock pencilBlockOff;
+	ColorBlock pencilBlockOn;
+	ColorBlock markerBlockOff;
+	ColorBlock markerBlockOn;
+
+	Texture2D tex;
+
+	IntList PuzzleSolution = new IntList();
+	IntList PuzzleCurrent = new IntList();
+	VectorList CurrentRunPos = new VectorList();
+
+	Tool currentTool = new Tool();
+
+	bool isPlaying = false;
+
+	#endregion
+
+
+	#region Start Function
+
+	void Start() {
+
+		#region Prepare the timer
+
+		timer = 0;
+		timerText = timerTextGO.GetComponent<Text>();
+		timerText.text = "0";
+		days = 0;
+		hours = 0;
+		minutes = 0;
+		seconds = 0;
+
+		#endregion
+
+		#region Prepare current game by loading puzzle size, difficulty, and control method, as well as grabbing color blocks for buttons
+
+		if (PlayerPrefs.HasKey(PUZZLE_SIZE)) {
+			puzzleSizeSelector.value = PlayerPrefs.GetInt(PUZZLE_SIZE) - 2;
+			puzzleWidth = PlayerPrefs.GetInt(PUZZLE_SIZE);
+		} else {
+			puzzleWidth = 5;
+		}
+
+		if (puzzleWidth > 20) {
+			puzzleWidth = 20;
+		}
+
+		if (PlayerPrefs.HasKey(DIFFICULTY)) {
+			difficultySelector.value = PlayerPrefs.GetInt(DIFFICULTY) - 1;
+			difficulty = PlayerPrefs.GetInt(DIFFICULTY);
+		} else {
+			difficulty = 1;
+		}
+
+		pencilBlockOff = pencilTool.colors;
+		markerBlockOff = markerTool.colors;
+
+		pencilBlockOn = pencilBlockOff;
+		pencilBlockOn.normalColor = AbstractPuzzleClass.darkGray;
+		pencilBlockOn.highlightedColor = AbstractPuzzleClass.darkGray;
+
+		markerBlockOn = markerBlockOff;
+		markerBlockOn.normalColor = Color.yellow;
+		markerBlockOn.highlightedColor = Color.yellow;
+
+		if (PlayerPrefs.HasKey(CONTROL_TOGGLE)) {
+			if (PlayerPrefs.GetInt(CONTROL_TOGGLE) == 0) {
+				hotkeyToggle.isOn = true;
+				mouseClickToggle.isOn = false;
+
+				controlMethod = 0;
+			} else if (PlayerPrefs.GetInt(CONTROL_TOGGLE) == 1) {
+				mouseClickToggle.isOn = true;
+				hotkeyToggle.isOn = false;
+
+				pencilTool.interactable = false;
+				markerTool.interactable = false;
+
+				controlMethod = 1;
+			} else {
+				PlayerPrefs.SetInt(CONTROL_TOGGLE, 0);
+				hotkeyToggle.isOn = true;
+				mouseClickToggle.isOn = false;
+
+				controlMethod = 0;
+			}
+		}
+
+		SetPencil();
+
+		#endregion
+
+
+		#region Set the grid size and bold grid sizes according to the puzzle size
+
+		gridGO.GetComponent<MeshRenderer>().material.mainTextureScale = new Vector2(puzzleWidth, puzzleWidth);
+
+		if (puzzleWidth >= 5) {
+			gridBGO.GetComponent<MeshRenderer>().material.mainTextureScale = new Vector2(puzzleWidth / 5f, puzzleWidth / 5f);
+		} else {
+			gridBGO.SetActive(false);
+		}
+
+		#endregion
+
+
+		#region Generate the puzzle, set the texture, and find the solution sequence
+
+		GetComponent<MeshRenderer>().material.mainTexture = AbstractPuzzleClass.GeneratePuzzle(puzzleWidth, puzzleWidth, difficulty);
+		tex = (Texture2D)GetComponent<MeshRenderer>().material.mainTexture;
+
+		PuzzleSolution = AbstractPuzzleClass.FindSolutionWConsecutives(tex, PuzzleSolution);
+
+		#endregion
+
+
+		#region Set up linespacing and font sizes, load the hints using the texture, then reset the texture
+
+		if (puzzleWidth <= 10 || puzzleWidth == 15 || puzzleWidth == 17) {
+			leftHints.lineSpacing = 2.5f;
+			topHints.lineSpacing = 2.5f;
+		} else if (puzzleWidth == 19) {
+			leftHints.lineSpacing = 2.6f;
+			topHints.lineSpacing = 2.6f;
+		}else {
+			leftHints.lineSpacing = 2.4f;
+			topHints.lineSpacing = 2.4f;
+		}
+
+		leftHints.fontSize = Mathf.FloorToInt(139 * Mathf.Pow(puzzleWidth, -1) + 0.5f);
+		topHints.fontSize = Mathf.FloorToInt(139 * Mathf.Pow(puzzleWidth, -1) + 0.5f);
+
+		leftHints.text = AbstractPuzzleClass.GetLeftHints(tex);
+		topHints.text = AbstractPuzzleClass.GetTopHints(tex);
+
+		tex = AbstractPuzzleClass.ResetPuzzle(tex);
+
+		#endregion
+
+		isPlaying = true;
+	}
+
+	#endregion
+
+	#region Update Methods
+
+	// Main Update method
+	void Update() {
+		// If the puzzle hasn't been completed...
+		if (isPlaying) {
+			// Update the timer...
+			UpdateTimer();
+
+			// Clear the PuzzleCurrent IntList, which holds our current configuration of numbers
+			PuzzleCurrent.Clear();
+
+			// Translate the mouse coordinates to be used with the puzzle
+			Vector3 mousePos = (puzzleWidth / 10f) * Camera.main.ScreenToWorldPoint(Input.mousePosition);
+
+			// If we are operating using the hotkeys A & D, and user presses one, set the appropriate tool
+			if (controlMethod == 0) {
+				if (Input.GetKeyDown(KeyCode.D)) {
+					SetPencil();
+				} else if (Input.GetKeyDown(KeyCode.A)) {
+					SetMarker();
+				}
+			}
+
+			// Update the cursor given the mouse position
+			UpdateCursor(mousePos);
+
+			// Update the puzzle given the mouse position
+			UpdatePuzzle(mousePos);
+
+			// Compare the PuzzleCurrent with the PuzzleSolution and store the match result
+			bool complete = AbstractPuzzleClass.CheckSolution(PuzzleCurrent, PuzzleSolution);
+
+			// If they match, the player wins
+			if (complete) {
+				WinCondition();
+			}
+
+			// If not, the loop repeats
+
+		} else if (!isPlaying && currentTool != Tool.arrow) {			// If the user has won, check to see that the Tool is set to the arrow, if not, execute this statement
+			// Set the cursor to the arrow by clearing
+			SetArrow();
+			// Set the cursor to the arrow
+			Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+		}
+	}
+
+
+	#region Separate Update Methods for updating the puzzle, timer, and cursor
+
+	void UpdatePuzzle(Vector3 mousePos) {
+
+		if (controlMethod == 0){
+			if (mousePos.x > 0 && mousePos.x < puzzleWidth && (-1 *mousePos.y > 0) && (-1 * mousePos.y < puzzleWidth) && Input.GetMouseButton(0)) {
+				if (!CurrentRunPos.Contains(new Vector2(Mathf.FloorToInt(mousePos.x), Mathf.FloorToInt(-1 * mousePos.y)))) {
+
+					CurrentRunPos.Add(AbstractPuzzleClass.SwitchPixel(currentTool, tex, CurrentRunPos, Mathf.FloorToInt(mousePos.x), Mathf.FloorToInt(-1 * mousePos.y)));
+					PuzzleCurrent = AbstractPuzzleClass.FindSolutionWConsecutives(tex, PuzzleCurrent);
+
+				}
+			} else if (Input.GetMouseButtonUp(0)) {
+				CurrentRunPos.Clear();
+			}
+		} else {
+			if (mousePos.x > 0 && mousePos.x < puzzleWidth && (-1 *mousePos.y > 0) && (-1 * mousePos.y < puzzleWidth) && (Input.GetMouseButton(0) || Input.GetMouseButton(1))) {
+				if (Input.GetMouseButton(0)) {
+					SetPencil();
+
+					CurrentRunPos.Add(AbstractPuzzleClass.SwitchPixel(currentTool, tex, CurrentRunPos, Mathf.FloorToInt(mousePos.x), Mathf.FloorToInt(-1 * mousePos.y)));
+					PuzzleCurrent = AbstractPuzzleClass.FindSolutionWConsecutives(tex, PuzzleCurrent);
+
+				} else if (Input.GetMouseButton(1)) {
+					SetMarker();
+
+					CurrentRunPos.Add(AbstractPuzzleClass.SwitchPixel(currentTool, tex, CurrentRunPos, Mathf.FloorToInt(mousePos.x), Mathf.FloorToInt(-1 * mousePos.y)));
+					PuzzleCurrent = AbstractPuzzleClass.FindSolutionWConsecutives(tex, PuzzleCurrent);
+				}
+			} else if (Input.GetMouseButtonUp(0) || Input.GetMouseButtonUp(1)) {
+				CurrentRunPos.Clear();
+			}
+		}
+	}
+
+	void UpdateTimer() {
+		timer += Time.deltaTime;
+
+		seconds = Mathf.FloorToInt(timer) % 60;
+		minutes = Mathf.FloorToInt(timer) / 60 % 60;
+		hours = Mathf.FloorToInt(timer) / 3600 % 24;
+		days = Mathf.FloorToInt(timer) / 86400;
+
+		string timerString;
+
+		if (days != 0) {
+			timerString = days.ToString("#0") + ":" + hours.ToString("#0") + ":" + minutes.ToString("#0") + ":" + seconds.ToString("00");
+		} else if (hours != 0) {
+			timerString = hours.ToString("#0") + ":" + minutes.ToString("#0") + ":" + seconds.ToString("00");
+		} else if (minutes != 0) {
+			timerString = minutes.ToString("#0") + ":" + seconds.ToString("00");
+		} else {
+			timerString = seconds.ToString("00");
+		}
+
+		timerText.text = timerString;
+	}
+
+	void UpdateCursor(Vector3 mousePos) {
+		if (mousePos.x > 0 && mousePos.x < puzzleWidth && (-1 *mousePos.y > 0) && (-1 * mousePos.y < puzzleWidth)) {
+			if (currentTool == Tool.pencil) {
+				Cursor.SetCursor(pencilCursor, new Vector2(16, 16), CursorMode.Auto);
+			} else if (currentTool == Tool.marker) {
+				Cursor.SetCursor(markCursor, new Vector2(16, 16), CursorMode.Auto);
+			} else {
+				Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+			}
+		} else {
+			Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+		}
+	}
+
+	#endregion
+
+	#endregion
+
+	#region Win condition
+
+	void WinCondition() {
+		isPlaying = false;
+		winText.SetActive(true);
+		GameObject.Find("Clear Button").GetComponent<Button>().interactable = false;
+	}
+
+	#endregion
+
+
+	#region Button and Tool Selection
+
+	public void NewPuzzle() {
+		int newPuzzleSize = puzzleSizeSelector.value + 2;
+		PlayerPrefs.SetInt(PUZZLE_SIZE, newPuzzleSize);
+
+		int newDifficulty = difficultySelector.value + 1;
+		PlayerPrefs.SetInt(DIFFICULTY, newDifficulty);
+
+		int newControlMethod = 0;
+		if (hotkeyToggle.isOn) {
+			newControlMethod = 0;
+		} else if (mouseClickToggle.isOn) {
+			newControlMethod = 1;
+		}
+		PlayerPrefs.SetInt(CONTROL_TOGGLE, newControlMethod);
+
+		SceneManager.LoadScene("GameScene");
+	}
+
+	public void ClearPuzzle() {
+		tex = AbstractPuzzleClass.ResetPuzzle(tex);
+		CurrentRunPos.Clear();
+	}
+
+
+	#region Control Method Selection
+
+	public void SetHotkeys() {
+		controlMethod = 0;
+
+		if (isPlaying) {
+			pencilTool.interactable = true;
+			markerTool.interactable = true;
+
+			SetPencil();
+		}
+	}
+
+	public void SetMouseClicks() {
+		controlMethod = 1;
+
+		if (isPlaying) {
+			pencilTool.interactable = false;
+			markerTool.interactable = false;
+
+			ResetTools();
+		}
+	}
+
+	#endregion
+
+	#region Tool Selection
+
+	public void SetPencil() {
+		currentTool = Tool.pencil;
+
+		if (controlMethod == 0) {
+			pencilTool.colors = pencilBlockOn;
+			pencilTool.GetComponentInChildren<Text>().color = Color.white;
+			markerTool.colors = markerBlockOff;
+		}
+	}
+
+	public void SetMarker() {
+		currentTool = Tool.marker;
+
+		if (controlMethod == 0) {
+			markerTool.colors = markerBlockOn;
+			pencilTool.colors = pencilBlockOff;
+			pencilTool.GetComponentInChildren<Text>().color = Color.black;
+		}
+	}
+
+	public void SetArrow() {
+		currentTool = Tool.arrow;
+
+		pencilTool.colors = pencilBlockOff;
+		pencilTool.GetComponentInChildren<Text>().color = Color.black;
+		markerTool.colors = markerBlockOff;
+	}
+
+	void ResetTools() {
+		pencilTool.colors = pencilBlockOff;
+		pencilTool.GetComponentInChildren<Text>().color = Color.black;
+		markerTool.colors = markerBlockOff;
+	}
+
+	#endregion
+
+	#endregion
+
+}
